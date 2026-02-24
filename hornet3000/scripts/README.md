@@ -4,6 +4,50 @@ Data processing and training scripts for the Asian Hornet detection project.
 
 ## Scripts
 
+### Auto-Labeling
+
+#### `grounding_dino_autolabel.py`
+Zero-shot object detection using Grounding DINO for auto-labeling images.
+
+```bash
+# CPU (Intel 14000 recommended)
+python scripts/grounding_dino_autolabel.py \
+    --input ../hornet-data-raw/inaturalist \
+    --output ../hornet-data-raw/inaturalist_labels
+
+# More accurate (slower)
+python scripts/grounding_dino_autolabel.py \
+    --input ../hornet-data-raw/inaturalist \
+    --output ../hornet-data-raw/inaturalist_labels \
+    --model IDEA-Research/grounding-dino-base
+
+# Adjust sensitivity
+python scripts/grounding_dino_autolabel.py \
+    --input ../hornet-data-raw/inaturalist \
+    --output ../hornet-data-raw/inaturalist_labels \
+    --box-threshold 0.3 \
+    --text-threshold 0.25
+```
+
+**Requirements:**
+```bash
+pip install torch torchvision transformers accelerate pillow tqdm
+```
+
+**Features:**
+- Zero-shot detection (no training needed)
+- Text prompts: "hornet. wasp. bee. insect."
+- Uses folder names for class mapping
+- Outputs YOLO format labels
+- Works CPU-only (slow but works)
+
+**Performance:**
+| Hardware | Time/Image | For 5000 Images |
+|----------|------------|-----------------|
+| Intel 14000 (CPU) | ~2-3 sec | ~3-4 hours |
+| RTX 3060 (GPU) | ~0.3 sec | ~25 min |
+| RTX 4090 (GPU) | ~0.1 sec | ~8 min |
+
 ### Data Download
 
 #### `download_inaturalist.py`
