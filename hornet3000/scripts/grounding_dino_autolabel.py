@@ -124,7 +124,7 @@ def detect_objects(image_path, processor, model, device, text_prompt=TEXT_PROMPT
         results = processor.post_process_grounded_object_detection(
             outputs,
             inputs.input_ids,
-            box_threshold=box_threshold,
+            threshold=box_threshold,
             text_threshold=text_threshold,
             target_sizes=[(img_h, img_w)]
         )
@@ -343,7 +343,7 @@ Examples:
                         choices=["auto", "cuda", "cpu", "mps"],
                         help="Device to use (default: auto)")
     parser.add_argument("--box-threshold", type=float, default=BOX_THRESHOLD,
-                        help=f"Box confidence threshold (default: {BOX_THRESHOLD})")
+                        help=f"Detection confidence threshold (default: {BOX_THRESHOLD})")
     parser.add_argument("--text-threshold", type=float, default=TEXT_THRESHOLD,
                         help=f"Text confidence threshold (default: {TEXT_THRESHOLD})")
     
