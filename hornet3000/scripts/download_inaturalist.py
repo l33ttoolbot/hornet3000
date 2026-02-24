@@ -71,23 +71,42 @@ def fetch_observations(taxon_id: int, page: int = 1) -> dict:
 def download_image(url: str, output_path: Path) -> bool:
     """Download a single image."""
     try:
-        # Get original size URL
-        original_url = url.replace("medium.", "original.")
-
+        # iNaturalist URL sizes: square, small, medium, large, original
+        # Replace any size suffix with 'original' to get full resolution
+        original_url = url
+        for size in ["square", "small", "medium", "large"]:
+            original_url = original_url.replace(f"/{size}.", "/original.")
+        
+        # Try original first
         response = requests.get(original_url, timeout=30, stream=True)
         if response.status_code == 200:
             with open(output_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             return True
-        elif response.status_code == 403:
-            # Fallback to medium if original not available
-            response = requests.get(url, timeout=30, stream=True)
-            if response.status_code == 200:
-                with open(output_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                return True
+        
+        # Fallback to large
+        large_url = url
+        for size in ["square", "small", "medium"]:
+            large_url = large_url.replace(f"/{size}.", "/large.")
+        response = requests.get(large_url, timeout=30, stream=True)
+        if response.status_code == 200:
+            with open(output_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return True
+        
+        # Last fallback: medium
+        medium_url = url
+        for size in ["square", "small"]:
+            medium_url = medium_url.replace(f"/{size}.", "/medium.")
+        response = requests.get(medium_url, timeout=30, stream=True)
+        if response.status_code == 200:
+            with open(output_path, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            return True
+            
     except Exception as e:
         print(f"  Error downloading {url}: {e}")
     return False
