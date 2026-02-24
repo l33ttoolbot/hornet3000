@@ -62,7 +62,7 @@ def fetch_observations(taxon_id: int, page: int = 1) -> dict:
         "order": "desc",
         "order_by": "created_at",
     }
-    
+
     response = requests.get(OBSERVATIONS_URL, params=params, timeout=30)
     response.raise_for_status()
     return response.json()
@@ -73,7 +73,7 @@ def download_image(url: str, output_path: Path) -> bool:
     try:
         # Get original size URL
         original_url = url.replace("medium.", "original.")
-        
+
         response = requests.get(original_url, timeout=30, stream=True)
         if response.status_code == 200:
             with open(output_path, "wb") as f:
@@ -100,62 +100,62 @@ def download_species(species_key: str, taxon_id: int, max_images: int = MAX_IMAG
     print(f"Taxon ID: {taxon_id}")
     print(f"Max images: {max_images}")
     print(f"{'='*60}")
-    
+
     output_dir = OUTPUT_BASE / species_key / "images"
     metadata = []
     downloaded = 0
     page = 1
-    
+
     while downloaded < max_images:
         print(f"\nFetching page {page}...")
-        
+
         try:
             data = fetch_observations(taxon_id, page)
         except Exception as e:
             print(f"Error fetching observations: {e}")
             break
-        
+
         results = data.get("results", [])
         if not results:
             print("No more observations.")
             break
-        
+
         total_results = data.get("total_results", 0)
         print(f"Found {total_results} total observations, {len(results)} on this page")
-        
+
         for obs in results:
             if downloaded >= max_images:
                 break
-            
+
             obs_id = obs.get("id")
             photos = obs.get("photos", [])
-            
+
             if not photos:
                 continue
-            
+
             for photo_idx, photo in enumerate(photos):
                 if downloaded >= max_images:
                     break
-                
+
                 photo_url = photo.get("url", "")
                 if not photo_url:
                     continue
-                
+
                 # Generate filename
                 extension = photo_url.split(".")[-1].split("?")[0]
                 filename = f"{obs_id}_{photo_idx}.{extension}"
                 output_path = output_dir / filename
-                
+
                 # Skip if already exists
                 if output_path.exists():
                     print(f"  Skipping existing: {filename}")
                     continue
-                
+
                 # Download image
                 print(f"  [{downloaded+1}/{max_images}] Downloading: {filename}")
                 if download_image(photo_url, output_path):
                     downloaded += 1
-                    
+
                     # Store metadata
                     metadata.append({
                         "observation_id": obs_id,
@@ -169,18 +169,18 @@ def download_species(species_key: str, taxon_id: int, max_images: int = MAX_IMAG
                         "user_login": obs.get("user", {}).get("login"),
                         "downloaded_at": datetime.now().isoformat(),
                     })
-                    
+
                     # Small delay between downloads
                     time.sleep(0.1)
-        
+
         page += 1
         time.sleep(RATE_LIMIT_DELAY)
-    
+
     # Save metadata
     metadata_file = OUTPUT_BASE / "metadata" / f"{species_key}_observations.json"
     with open(metadata_file, "w") as f:
         json.dump(metadata, f, indent=2)
-    
+
     print(f"\nDownloaded {downloaded} images for {species_key}")
     return downloaded
 
@@ -190,14 +190,14 @@ def main():
     print("="*60)
     print("iNaturalist Image Downloader for Hornet Dataset")
     print("="*60)
-    
+
     create_output_dirs()
-    
+
     total_downloaded = 0
     for species_key, info in SPECIES.items():
         count = download_species(species_key, info["taxon_id"])
         total_downloaded += count
-    
+
     print(f"\n{'='*60}")
     print(f"COMPLETE: Downloaded {total_downloaded} images total")
     print(f"Output: {OUTPUT_BASE}")
