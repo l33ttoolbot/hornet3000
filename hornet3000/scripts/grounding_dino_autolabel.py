@@ -101,7 +101,7 @@ def load_model(model_id=MODEL_ID, device="auto"):
 # Detection
 # ============================================================================
 
-def detect_objects(image_path, processor, model, device, text_prompt=TEXT_PROMPT):
+def detect_objects(image_path, processor, model, device, text_prompt=TEXT_PROMPT, box_threshold=BOX_THRESHOLD, text_threshold=TEXT_THRESHOLD):
     """
     Run detection on a single image.
     
@@ -124,8 +124,8 @@ def detect_objects(image_path, processor, model, device, text_prompt=TEXT_PROMPT
         results = processor.post_process_grounded_object_detection(
             outputs,
             inputs.input_ids,
-            box_threshold=BOX_THRESHOLD,
-            text_threshold=TEXT_THRESHOLD,
+            box_threshold=box_threshold,
+            text_threshold=text_threshold,
             target_sizes=[(img_h, img_w)]
         )
         
@@ -203,7 +203,7 @@ def get_species_from_path(image_path, input_root):
     return None
 
 
-def process_folder(input_dir, output_dir, processor, model, device):
+def process_folder(input_dir, output_dir, processor, model, device, box_threshold=BOX_THRESHOLD, text_threshold=TEXT_THRESHOLD):
     """
     Process all images in a folder.
     
@@ -211,6 +211,8 @@ def process_folder(input_dir, output_dir, processor, model, device):
         input_dir: Root folder with images
         output_dir: Output folder for labels
         processor, model, device: Grounding DINO components
+        box_threshold: Box confidence threshold
+        text_threshold: Text confidence threshold
     
     Returns:
         (processed_count, labelled_count, error_count)
@@ -238,7 +240,9 @@ def process_folder(input_dir, output_dir, processor, model, device):
     # Process each image
     for img_path in tqdm(images, desc="Labeling"):
         try:
-            result = detect_objects(img_path, processor, model, device)
+            result = detect_objects(img_path, processor, model, device, 
+                                    box_threshold=box_threshold, 
+                                    text_threshold=text_threshold)
             
             if result is None:
                 errors += 1
@@ -345,17 +349,14 @@ Examples:
     
     args = parser.parse_args()
     
-    # Update global thresholds
-    global BOX_THRESHOLD, TEXT_THRESHOLD
-    BOX_THRESHOLD = args.box_threshold
-    TEXT_THRESHOLD = args.text_threshold
-    
     # Load model
     processor, model, device = load_model(args.model, args.device)
     
     # Process
     start_time = datetime.now()
-    process_folder(args.input, args.output, processor, model, device)
+    process_folder(args.input, args.output, processor, model, device,
+                   box_threshold=args.box_threshold,
+                   text_threshold=args.text_threshold)
     elapsed = datetime.now() - start_time
     
     print(f"\nTime elapsed: {elapsed}")
