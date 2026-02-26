@@ -6,7 +6,14 @@ Zero-Shot Object Detection für Hornissen, Wespen und Bienen.
 Läuft CPU-only (Intel 14000 empfohlen) oder GPU.
 
 Usage:
+    # Label all images (skip existing labels by default)
     python grounding_dino_autolabel.py --input ../hornet-data-raw/inaturalist --output ../hornet-data-raw/inaturalist_labels
+
+    # Force re-label everything (overwrite existing)
+    python grounding_dino_autolabel.py --input ../hornet-data-raw/inaturalist --output ../hornet-data-raw/inaturalist_labels --force
+
+    # Clean up orphan labels (labels without corresponding images)
+    python grounding_dino_autolabel.py --input ../hornet-data-raw/inaturalist --output ../hornet-data-raw/inaturalist_labels --clean-orphans
 
 Requirements:
     pip install torch torchvision transformers accelerate pillow tqdm
@@ -203,7 +210,46 @@ def get_species_from_path(image_path, input_root):
     return None
 
 
-def process_folder(input_dir, output_dir, processor, model, device, box_threshold=BOX_THRESHOLD, text_threshold=TEXT_THRESHOLD):
+def clean_orphan_labels(input_dir, output_dir):
+    """
+    Remove label files that have no corresponding image.
+    
+    Returns:
+        Number of orphan labels removed
+    """
+    input_path = Path(input_dir).resolve()
+    output_path = Path(output_dir).resolve()
+    
+    if not output_path.exists():
+        return 0
+    
+    # Find all label files
+    label_files = list(output_path.rglob("*.txt"))
+    orphans = 0
+    
+    for label_file in label_files:
+        # Construct expected image path
+        rel_path = label_file.relative_to(output_path)
+        img_name = rel_path.with_suffix("")  # Remove .txt
+        
+        # Check for common image extensions
+        img_exists = False
+        for ext in [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]:
+            potential_img = input_path / (img_name.with_suffix(ext))
+            if potential_img.exists():
+                img_exists = True
+                break
+        
+        if not img_exists:
+            label_file.unlink()
+            orphans += 1
+    
+    return orphans
+
+
+def process_folder(input_dir, output_dir, processor, model, device, 
+                   box_threshold=BOX_THRESHOLD, text_threshold=TEXT_THRESHOLD,
+                   skip_existing=True, force=False):
     """
     Process all images in a folder.
     
@@ -213,9 +259,11 @@ def process_folder(input_dir, output_dir, processor, model, device, box_threshol
         processor, model, device: Grounding DINO components
         box_threshold: Box confidence threshold
         text_threshold: Text confidence threshold
+        skip_existing: Skip images that already have labels (default: True)
+        force: Overwrite all existing labels (default: False)
     
     Returns:
-        (processed_count, labelled_count, error_count)
+        (processed_count, labelled_count, skipped_count, error_count)
     """
     input_path = Path(input_dir).resolve()
     output_path = Path(output_dir).resolve()
@@ -229,17 +277,42 @@ def process_folder(input_dir, output_dir, processor, model, device, box_threshol
     print(f"\nFound {len(images)} images")
     print(f"Input:  {input_path}")
     print(f"Output: {output_path}")
+    if skip_existing and not force:
+        print(f"Mode:   Skip existing labels")
+    elif force:
+        print(f"Mode:   Force overwrite (re-label all)")
     
     # Statistics
     processed = 0
     labelled = 0
+    skipped = 0
     errors = 0
     no_detection = 0
     species_stats = {}
     
+    # Check for existing labels first (for summary)
+    if skip_existing and not force:
+        existing_count = 0
+        for img_path in images:
+            rel_path = img_path.relative_to(input_path)
+            label_path = output_path / (rel_path.with_suffix(".txt"))
+            if label_path.exists():
+                existing_count += 1
+        if existing_count > 0:
+            print(f"Existing labels: {existing_count} (will be skipped)")
+    
     # Process each image
     for img_path in tqdm(images, desc="Labeling"):
         try:
+            # Determine label path
+            rel_path = img_path.relative_to(input_path)
+            label_path = output_path / (rel_path.with_suffix(".txt"))
+            
+            # Skip if label already exists (unless force)
+            if skip_existing and not force and label_path.exists():
+                skipped += 1
+                continue
+            
             result = detect_objects(img_path, processor, model, device, 
                                     box_threshold=box_threshold, 
                                     text_threshold=text_threshold)
@@ -248,19 +321,21 @@ def process_folder(input_dir, output_dir, processor, model, device, box_threshol
                 errors += 1
                 continue
             
-            if len(result["boxes"]) == 0:
-                no_detection += 1
-                processed += 1
-                continue
-            
             # Determine class ID
             # Priority: folder name > detected label
             folder_class = get_species_from_path(img_path, input_path)
             
             # Create label file (mirrors folder structure)
-            rel_path = img_path.relative_to(input_path)
-            label_path = output_path / (rel_path.with_suffix(".txt"))
             label_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Handle no detections
+            if len(result["boxes"]) == 0:
+                # Still create empty label file (marks image as processed)
+                # This prevents re-processing on next run
+                label_path.touch()
+                no_detection += 1
+                processed += 1
+                continue
             
             with open(label_path, "w") as f:
                 for box, label, score in zip(
@@ -301,15 +376,16 @@ def process_folder(input_dir, output_dir, processor, model, device, box_threshol
     print(f"\n{'='*60}")
     print("SUMMARY")
     print(f"{'='*60}")
-    print(f"Processed:      {processed}")
+    print(f"Total images:   {len(images)}")
     print(f"Labeled:        {labelled}")
     print(f"No detections:  {no_detection}")
+    print(f"Skipped:        {skipped}")
     print(f"Errors:         {errors}")
     print(f"\nBy species:")
     for species, count in sorted(species_stats.items()):
         print(f"  {species}: {count}")
     
-    return processed, labelled, errors
+    return processed, labelled, skipped, errors
 
 
 # ============================================================================
@@ -322,14 +398,26 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Label all images in a folder
+    # Label all images (skip existing labels by default)
     python grounding_dino_autolabel.py --input ./images --output ./labels
+    
+    # Force re-label everything (overwrite existing)
+    python grounding_dino_autolabel.py --input ./images --output ./labels --force
+    
+    # Clean up orphan labels first, then label
+    python grounding_dino_autolabel.py --input ./images --output ./labels --clean-orphans
     
     # Use more accurate (but slower) model
     python grounding_dino_autolabel.py --input ./images --output ./labels --model IDEA-Research/grounding-dino-base
     
     # Force CPU
     python grounding_dino_autolabel.py --input ./images --output ./labels --device cpu
+
+Behavior:
+    - By default, skips images that already have a .txt label file
+    - Empty images (no detections) get an empty .txt file to mark them as processed
+    - Use --force to re-label everything (overwrites existing labels)
+    - Use --clean-orphans to remove labels without corresponding images first
         """
     )
     
@@ -346,17 +434,35 @@ Examples:
                         help=f"Detection confidence threshold (default: {BOX_THRESHOLD})")
     parser.add_argument("--text-threshold", type=float, default=TEXT_THRESHOLD,
                         help=f"Text confidence threshold (default: {TEXT_THRESHOLD})")
+    parser.add_argument("--force", "-f", action="store_true",
+                        help="Force re-labeling (overwrite existing labels)")
+    parser.add_argument("--no-skip", action="store_true",
+                        help="Don't skip existing labels (same as --force)")
+    parser.add_argument("--clean-orphans", action="store_true",
+                        help="Remove orphan labels (labels without images) before processing")
     
     args = parser.parse_args()
     
+    # Clean orphans if requested
+    if args.clean_orphans:
+        print("\nCleaning orphan labels...")
+        orphans = clean_orphan_labels(args.input, args.output)
+        print(f"Removed {orphans} orphan label(s)")
+    
     # Load model
     processor, model, device = load_model(args.model, args.device)
+    
+    # Determine skip behavior
+    skip_existing = not args.force and not args.no_skip
+    force = args.force or args.no_skip
     
     # Process
     start_time = datetime.now()
     process_folder(args.input, args.output, processor, model, device,
                    box_threshold=args.box_threshold,
-                   text_threshold=args.text_threshold)
+                   text_threshold=args.text_threshold,
+                   skip_existing=skip_existing,
+                   force=force)
     elapsed = datetime.now() - start_time
     
     print(f"\nTime elapsed: {elapsed}")
